@@ -1,0 +1,538 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>周辺視野リーチ訓練</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+JP:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#E7ECEF; --panel:#F6F8F9; --ink:#1E2934; --mute:#5B6875; --line:#C2CBD2;
+  --signal:#E2A400; --fast:#2F6FD6; --miss:#C2453A;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){ --paper:#151B21; --panel:#1D252D; --ink:#DCE3E8; --mute:#93A1AD; --line:#34414D; }
+}
+:root[data-theme="dark"]{ --paper:#151B21; --panel:#1D252D; --ink:#DCE3E8; --mute:#93A1AD; --line:#34414D; }
+*,*::before,*::after{box-sizing:inherit}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--paper);color:var(--ink);
+  font:16px/1.65 "IBM Plex Sans JP",system-ui,-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif}
+main{max-width:1080px;margin:0 auto;padding:28px 20px 48px;display:grid;gap:28px;
+  grid-template-columns:minmax(0,1fr)}
+@media (min-width:860px){ main{grid-template-columns:minmax(0,1fr) 380px} #history{grid-column:1 / -1} }
+h1{font-size:1.9rem;line-height:1.25;margin:0 0 6px;font-weight:600;letter-spacing:.01em}
+h2{font-size:1.1rem;margin:0 0 12px;font-weight:600}
+p{margin:0 0 10px;max-width:62ch}
+.lede{color:var(--mute)}
+section{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:20px}
+header{grid-column:1 / -1}
+fieldset{border:0;margin:0 0 18px;padding:0}
+legend{font-weight:600;margin-bottom:6px;padding:0}
+.opts{display:flex;flex-wrap:wrap;gap:8px}
+.opts label{display:flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:4px;
+  padding:8px 12px;cursor:pointer;min-height:44px}
+.opts label:has(input:checked){border-color:var(--ink)}
+.row{display:flex;flex-wrap:wrap;gap:16px}
+.num label{display:block;font-weight:600}
+.num input{width:120px;font:inherit;padding:8px;border:1px solid var(--line);border-radius:4px;
+  background:var(--paper);color:var(--ink);min-height:44px}
+.hint{font-size:.85rem;color:var(--mute)}
+button{font:inherit;font-weight:600;border-radius:4px;cursor:pointer;min-height:44px;padding:10px 18px;
+  border:1px solid var(--ink);background:transparent;color:var(--ink)}
+button.primary{background:var(--ink);color:var(--paper);font-size:1.1rem;padding:14px 28px}
+button:focus-visible,input:focus-visible{outline:3px solid var(--signal);outline-offset:2px}
+#xrstatus{margin-top:10px;font-size:.9rem;color:var(--mute)}
+#chart svg{width:100%;height:auto;display:block}
+.legend{display:flex;gap:14px;font-size:.85rem;color:var(--mute);margin-top:8px;flex-wrap:wrap}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:middle}
+.tablewrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:.92rem;font-variant-numeric:tabular-nums}
+th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+th{color:var(--mute);font-weight:600}
+.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+canvas.xr{position:fixed;inset:0;visibility:hidden;pointer-events:none;z-index:-1}
+</style>
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}
+</script>
+</head>
+<body>
+<main>
+<header>
+  <h1>周辺視野リーチ訓練</h1>
+  <p class="lede">中央の点を見たまま、視野の端に出た玉へできるだけ速く手を当てます。反応時間（動き出すまで）と運動時間（当たるまで）を分けて記録します。</p>
+</header>
+
+<section id="setup" aria-labelledby="setup-h">
+  <h2 id="setup-h">設定</h2>
+  <fieldset>
+    <legend>見せ方</legend>
+    <div class="opts">
+      <label><input type="radio" name="mode" value="hold" checked>当てるまで表示</label>
+      <label><input type="radio" name="mode" value="flash">短時間で消える</label>
+      <label><input type="radio" name="mode" value="mix">両方を混ぜる</label>
+    </div>
+  </fieldset>
+  <fieldset>
+    <legend>離心角（中央からの角度）</legend>
+    <div class="opts">
+      <label><input type="checkbox" name="ecc" value="15" checked>15°</label>
+      <label><input type="checkbox" name="ecc" value="30" checked>30°</label>
+      <label><input type="checkbox" name="ecc" value="45" checked>45°</label>
+      <label><input type="checkbox" name="ecc" value="55">55°</label>
+    </div>
+    <p class="hint">Quest 3 の表示は中央から左右おおよそ50°台まで、上下はそれより狭めです。55°は表示の端で欠けることがあります。</p>
+  </fieldset>
+  <div class="row num">
+    <div><label for="flashMs">表示時間 ms</label><input id="flashMs" type="number" value="150" min="30" max="2000" step="10"></div>
+    <div><label for="reps">繰り返し</label><input id="reps" type="number" value="1" min="1" max="10"></div>
+    <div><label for="timeout">制限時間 ms</label><input id="timeout" type="number" value="3000" min="1000" max="10000" step="100"></div>
+  </div>
+  <p class="hint">表示時間は「短時間で消える」の玉と、中央記号の両方に使います。180ms以下だと、目が玉へ向く前に消えます。</p>
+  <fieldset>
+    <legend>注視の確認</legend>
+    <div class="opts"><label><input type="checkbox" id="central" checked>中央記号（○か×）を答える</label></div>
+  </fieldset>
+  <p id="count" class="hint"></p>
+  <button id="enter" class="primary" type="button">VRで開始</button>
+  <p id="xrstatus"></p>
+</section>
+
+<section id="chart" aria-labelledby="chart-h">
+  <h2 id="chart-h">配置と結果</h2>
+  <div id="svgwrap"></div>
+  <div class="legend" id="legend"></div>
+  <p class="hint" id="chartnote">点は玉の出る位置です（あなたから見た視野）。</p>
+</section>
+
+<section id="history" aria-labelledby="hist-h">
+  <h2 id="hist-h">履歴</h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th>日時</th><th>見せ方</th><th>試行</th><th>命中</th><th>反応 中央値</th><th>運動 中央値</th><th>合計 中央値</th><th>記号正答</th></tr></thead>
+    <tbody id="histbody"></tbody>
+  </table></div>
+  <div class="actions">
+    <button id="dlLast" type="button">最新回をCSVで保存</button>
+    <button id="dlAll" type="button">全履歴をCSVで保存</button>
+    <button id="clear" type="button">履歴を消去</button>
+  </div>
+</section>
+</main>
+
+<script type="module">
+import * as THREE from 'three';
+
+const $ = id => document.getElementById(id);
+const clamp = (v,a,b) => Math.min(b, Math.max(a, v));
+const DIRS = [0,45,90,135,180,225,270,315];          // 0=右, 90=上（視野内の方向）
+const HOME_R = 0.08, HEAD_TOL = 5, POS_TOL = 0.12;
+const TARGET_R = 0.045, HAND_R = 0.03, MOVE_THRESH = 0.02;
+const STORE = 'pvr-history-v1';
+const median = a => { if(!a.length) return null; const s=[...a].sort((x,y)=>x-y), m=s.length>>1; return s.length%2 ? s[m] : (s[m-1]+s[m])/2; };
+const r0 = v => v==null ? '–' : Math.round(v);
+
+/* ---------- 設定 ---------- */
+function readSettings(){
+  const mode = document.querySelector('input[name=mode]:checked').value;
+  const eccs = [...document.querySelectorAll('input[name=ecc]:checked')].map(e=>+e.value);
+  return {
+    mode, eccs,
+    flashMs: clamp(+$('flashMs').value || 150, 30, 2000),
+    reps: clamp(Math.round(+$('reps').value || 1), 1, 10),
+    timeoutMs: clamp(+$('timeout').value || 3000, 1000, 10000),
+    central: $('central').checked,
+  };
+}
+function buildTrials(s){
+  const modes = s.mode === 'mix' ? ['hold','flash'] : [s.mode];
+  const list = [];
+  for(let r=0;r<s.reps;r++) for(const ecc of s.eccs) for(const dir of DIRS) for(const mode of modes) list.push({ecc,dir,mode});
+  for(let i=list.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [list[i],list[j]]=[list[j],list[i]]; }
+  return list;
+}
+function updateCount(){
+  const s = readSettings();
+  const n = s.eccs.length * DIRS.length * s.reps * (s.mode==='mix'?2:1);
+  $('count').textContent = n ? `1回あたり ${n} 試行（目安 ${Math.ceil(n*4/60)} 分）` : '離心角を1つ以上選んでください。';
+  $('enter').disabled = !n;
+  if(!lastShownSession) renderChart(null);
+}
+
+/* ---------- 履歴 ---------- */
+function loadHistory(){ try{ return JSON.parse(localStorage.getItem(STORE)) || []; }catch{ return []; } }
+function saveHistory(h){ try{ localStorage.setItem(STORE, JSON.stringify(h.slice(-200))); }catch{} }
+function summarize(trials){
+  const hits = trials.filter(t=>t.hit);
+  const cen = trials.filter(t=>t.central_shown);
+  return {
+    n: trials.length, hits: hits.length,
+    rt: median(hits.map(t=>t.rt_ms)), mt: median(hits.map(t=>t.mt_ms)), total: median(hits.map(t=>t.total_ms)),
+    cenOk: cen.filter(t=>t.central_correct).length, cenN: cen.length,
+  };
+}
+const modeName = m => ({hold:'表示し続ける',flash:'短時間',mix:'混合'})[m] || m;
+function renderHistory(){
+  const h = loadHistory();
+  const body = $('histbody'); body.innerHTML = '';
+  if(!h.length){ body.innerHTML = '<tr><td colspan="8">まだ記録がありません。設定を選んで「VRで開始」を押してください。</td></tr>'; return; }
+  for(const s of [...h].reverse().slice(0,20)){
+    const m = summarize(s.trials);
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${new Date(s.date).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}${s.complete?'':'（中断）'}</td>
+      <td>${modeName(s.settings.mode)}</td><td>${m.n}</td><td>${m.hits}</td>
+      <td>${r0(m.rt)}</td><td>${r0(m.mt)}</td><td>${r0(m.total)}</td>
+      <td>${m.cenN? `${m.cenOk}/${m.cenN}`:'–'}</td>`;
+    body.appendChild(tr);
+  }
+}
+const CSV_COLS = ['session','date','trial','mode','flash_ms','ecc_deg','dir_deg','hit','hand','rt_ms','mt_ms','total_ms','shown_ms','head_dev_max_deg','central_shown','central_answer','central_correct','aborted_holds','reach_radius_m'];
+function toCSV(sessions){
+  const rows = [CSV_COLS.join(',')];
+  for(const s of sessions) s.trials.forEach((t,i)=>{
+    const rec = {...t, session:s.id, date:s.date, trial:i+1, reach_radius_m:s.radius};
+    rows.push(CSV_COLS.map(c => rec[c]==null ? '' : rec[c]).join(','));
+  });
+  return rows.join('\n');
+}
+function download(name, text){
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob(['\ufeff'+text],{type:'text/csv'}));
+  a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 2000);
+}
+$('dlLast').onclick = () => { const h=loadHistory(); if(h.length) download(`reach_${h.at(-1).id}.csv`, toCSV([h.at(-1)])); };
+$('dlAll').onclick = () => { const h=loadHistory(); if(h.length) download('reach_all.csv', toCSV(h)); };
+$('clear').onclick = () => { if(confirm('履歴をすべて消去します。元に戻せません。')){ saveHistory([]); lastShownSession=null; renderHistory(); renderChart(null); } };
+
+/* ---------- 視野チャート（ペリメトリー風） ---------- */
+let lastShownSession = null;
+function renderChart(session){
+  const W=340, C=W/2, K=(C-22)/60;
+  const css = getComputedStyle(document.documentElement);
+  const ink=css.getPropertyValue('--ink').trim(), line=css.getPropertyValue('--line').trim(),
+        mute=css.getPropertyValue('--mute').trim(), fast=css.getPropertyValue('--fast').trim(),
+        sig=css.getPropertyValue('--signal').trim(), miss=css.getPropertyValue('--miss').trim();
+  let g = `<svg viewBox="0 0 ${W} ${W}" role="img" aria-label="視野上の玉の位置と結果">`;
+  for(const r of [15,30,45,60]){
+    g += `<circle cx="${C}" cy="${C}" r="${r*K}" fill="none" stroke="${line}" stroke-width="1"/>`;
+    g += `<text x="${C+3}" y="${C-r*K-3}" font-size="10" fill="${mute}">${r}°</text>`;
+  }
+  for(const d of [0,45,90,135]){ const a=d*Math.PI/180, L=60*K;
+    g += `<line x1="${C-Math.cos(a)*L}" y1="${C+Math.sin(a)*L}" x2="${C+Math.cos(a)*L}" y2="${C-Math.sin(a)*L}" stroke="${line}" stroke-width="1"/>`; }
+  g += `<circle cx="${C}" cy="${C}" r="3" fill="${ink}"/>`;
+  const pos = (ecc,dir)=>[C+Math.cos(dir*Math.PI/180)*ecc*K, C-Math.sin(dir*Math.PI/180)*ecc*K];
+  if(!session){
+    for(const ecc of readSettings().eccs) for(const dir of DIRS){ const [x,y]=pos(ecc,dir);
+      g += `<circle cx="${x}" cy="${y}" r="5" fill="${sig}" opacity=".8"/>`; }
+    $('legend').innerHTML = `<span><i style="background:${sig}"></i>玉の出る位置</span>`;
+    $('chartnote').textContent = '点は玉の出る位置です（あなたから見た視野）。終わるとここに結果が出ます。';
+  } else {
+    const cells = new Map();
+    for(const t of session.trials){ const k=`${t.ecc_deg}/${t.dir_deg}`; if(!cells.has(k)) cells.set(k,{ecc:t.ecc_deg,dir:t.dir_deg,ts:[],miss:0}); const c=cells.get(k); t.hit? c.ts.push(t.total_ms) : c.miss++; }
+    const meds = [...cells.values()].map(c=>median(c.ts)).filter(v=>v!=null);
+    const lo=Math.min(...meds), hi=Math.max(...meds);
+    const lerp=(a,b,t)=>{ const p=h=>[1,3,5].map(i=>parseInt(h.slice(i,i+2),16)); const A=p(a),B=p(b); return `rgb(${A.map((v,i)=>Math.round(v+(B[i]-v)*t)).join(',')})`; };
+    for(const c of cells.values()){ const [x,y]=pos(c.ecc,c.dir); const m=median(c.ts);
+      if(m==null){ g += `<circle cx="${x}" cy="${y}" r="7" fill="none" stroke="${miss}" stroke-width="2"/>`; continue; }
+      const t = hi>lo ? (m-lo)/(hi-lo) : 0;
+      g += `<circle cx="${x}" cy="${y}" r="9" fill="${lerp(fast,sig,t)}"/>`;
+      g += `<text x="${x}" y="${y+20}" font-size="9" text-anchor="middle" fill="${ink}">${Math.round(m)}</text>`;
+    }
+    $('legend').innerHTML = `<span><i style="background:${fast}"></i>速い</span><span><i style="background:${sig}"></i>遅い</span><span><i style="border:2px solid ${miss};background:none"></i>当たらず</span>`;
+    $('chartnote').textContent = '数字は位置ごとの合計時間の中央値（ms）。最新の1回分です。';
+  }
+  $('svgwrap').innerHTML = g + '</svg>';
+}
+
+/* ---------- three.js シーン ---------- */
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.xr.enabled = true;
+renderer.xr.setReferenceSpaceType('local-floor');
+renderer.domElement.className = 'xr';
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1b2229);
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 50);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x3a4048, 1.4));
+const dl = new THREE.DirectionalLight(0xffffff, 1.2); dl.position.set(1,3,2); scene.add(dl);
+const grid = new THREE.GridHelper(12, 24, 0x3a4652, 0x28313a); scene.add(grid);
+
+const basic = c => new THREE.MeshBasicMaterial({color:c});
+const fixGroup = new THREE.Group(); scene.add(fixGroup);
+const fixDot = new THREE.Mesh(new THREE.SphereGeometry(0.004,12,8), basic(0xffffff)); fixGroup.add(fixDot);
+const symO = new THREE.Mesh(new THREE.RingGeometry(0.010,0.0135,40), basic(0xffffff));
+const symX = new THREE.Group();
+for(const r of [Math.PI/4,-Math.PI/4]){ const b=new THREE.Mesh(new THREE.PlaneGeometry(0.028,0.0035), basic(0xffffff)); b.rotation.z=r; symX.add(b); }
+symO.position.z = symX.position.z = 0.001;
+fixGroup.add(symO, symX); symO.visible = symX.visible = false; fixGroup.visible = false;
+
+const target = new THREE.Mesh(new THREE.SphereGeometry(TARGET_R,24,16),
+  new THREE.MeshStandardMaterial({color:0xe2a400, emissive:0x6b4d00, roughness:.5}));
+target.visible = false; scene.add(target);
+
+const homeMats = [0,1].map(()=>new THREE.MeshBasicMaterial({color:0x8fa3b5, transparent:true, opacity:.2, depthWrite:false}));
+const homes = homeMats.map(m=>{ const s=new THREE.Mesh(new THREE.SphereGeometry(HOME_R,24,16), m); s.visible=false; scene.add(s); return s; });
+
+class Panel{
+  constructor(w,h,px=1024){
+    this.c = document.createElement('canvas'); this.c.width=px; this.c.height=Math.round(px*h/w);
+    this.x = this.c.getContext('2d');
+    this.tex = new THREE.CanvasTexture(this.c); this.tex.colorSpace = THREE.SRGBColorSpace;
+    this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(w,h), new THREE.MeshBasicMaterial({map:this.tex, transparent:true, depthWrite:false}));
+    this.mesh.visible = false; scene.add(this.mesh);
+  }
+  draw(lines, size=44){
+    const {x,c} = this; x.clearRect(0,0,c.width,c.height);
+    x.fillStyle='rgba(24,32,40,.9)'; x.beginPath(); x.roundRect(0,0,c.width,c.height,28); x.fill();
+    x.textBaseline='top'; let y=36;
+    for(const L of lines){
+      const it = typeof L==='string' ? {t:L} : L, s = it.size||size;
+      x.font = `${it.bold?600:400} ${s}px system-ui, "Noto Sans CJK JP", sans-serif`;
+      x.fillStyle = it.color || '#e3e9ee';
+      if(it.cols){ it.cols.forEach((v,i)=>x.fillText(String(v), 48 + i*(c.width-96)/it.cols.length, y)); }
+      else x.fillText(it.t, 48, y);
+      y += s*1.45;
+    }
+    this.tex.needsUpdate = true;
+  }
+  place(pos, look){ this.mesh.position.copy(pos); this.mesh.lookAt(look); this.mesh.visible = true; }
+}
+const board = new Panel(0.9, 0.62);
+const hint = new Panel(0.30, 0.06, 512);
+
+/* ---------- コントローラー ---------- */
+const hands = [0,1].map(i=>{
+  const grip = renderer.xr.getControllerGrip(i), ctrl = renderer.xr.getController(i);
+  grip.add(new THREE.Mesh(new THREE.SphereGeometry(HAND_R,16,12), new THREE.MeshStandardMaterial({color:0xcfd8e0, roughness:.6})));
+  scene.add(grip, ctrl);
+  const h = {grip, ctrl, source:null, prev:new THREE.Vector3(), btn:[false,false]};
+  ctrl.addEventListener('connected', e=>{ h.source=e.data; });
+  ctrl.addEventListener('disconnected', ()=>{ h.source=null; });
+  ctrl.addEventListener('selectstart', ()=>events.push({type:'trigger', hand:i}));
+  return h;
+});
+let events = [];
+function pollButtons(){
+  hands.forEach((h,i)=>{
+    const b = h.source?.gamepad?.buttons; if(!b) return;
+    [4,5].forEach((bi,k)=>{ const p=!!b[bi]?.pressed; if(p && !h.btn[k]) events.push({type: k? 'upper':'lower', hand:i}); h.btn[k]=p; });
+  });
+}
+const handOk = i => hands[i].grip.visible && hands[i].source;
+const buzz = (i, s=.7, ms=40) => { try{ hands[i].source?.gamepad?.hapticActuators?.[0]?.pulse(s, ms); }catch{} };
+
+/* ---------- 実行状態 ---------- */
+const head = {pos:new THREE.Vector3(), fwd:new THREE.Vector3(), ok:false};
+const V = () => new THREE.Vector3();
+const cal = {headPos:V(), f:V(), r:V(), u:new THREE.Vector3(0,1,0), R:0.5, fix:V(), done:false};
+let run = null, lastTime = 0, frameDt = 11;
+
+function newRun(settings){
+  run = { id: new Date().toISOString().replace(/[:.]/g,'-'), date: new Date().toISOString(), settings,
+          trials: buildTrials(settings), idx:0, results:[], saved:false,
+          phase: cal.done ? 'wait' : 'cal_home', placed:false };
+  if(cal.done) prepWait();
+}
+function headDevTo(p){ const d = p.clone().sub(head.pos).normalize(); return THREE.MathUtils.radToDeg(Math.acos(clamp(head.fwd.dot(d),-1,1))); }
+function targetPos(ecc,dir){
+  const e=THREE.MathUtils.degToRad(ecc), d=THREE.MathUtils.degToRad(dir);
+  const side = cal.r.clone().multiplyScalar(Math.cos(d)).addScaledVector(cal.u, Math.sin(d));
+  return cal.headPos.clone().addScaledVector(cal.f, Math.cos(e)*cal.R).addScaledVector(side, Math.sin(e)*cal.R);
+}
+function prepWait(){
+  run.phase='wait'; run.holdStart=null; run.aborted=0; run.fore = 800 + Math.random()*1000;
+  fixGroup.visible = true; homes.forEach(h=>h.visible=true); target.visible=false; board.mesh.visible=false;
+}
+function showBoard(lines){
+  board.draw(lines);
+  const p = head.ok ? (cal.done ? cal.headPos.clone().addScaledVector(cal.f,1.0).addScaledVector(cal.u,-0.05)
+                                : head.pos.clone().add(new THREE.Vector3(head.fwd.x,0,head.fwd.z).normalize().multiplyScalar(1.0))) : new THREE.Vector3(0,1.5,-1);
+  board.place(p, cal.done ? cal.headPos : head.pos);
+}
+function setHint(t){
+  if(!t){ hint.mesh.visible=false; hint.last=null; return; }
+  if(hint.last!==t){ hint.draw([{t, size:34}]); hint.last=t; }
+  hint.place(cal.fix.clone().addScaledVector(cal.u,-0.09), cal.headPos);
+}
+function segDist(a,b,c){
+  const ab=b.clone().sub(a), t=clamp(c.clone().sub(a).dot(ab)/Math.max(ab.lengthSq(),1e-9),0,1);
+  return a.clone().addScaledVector(ab,t).distanceTo(c);
+}
+
+function step(time){
+  frameDt = lastTime ? time-lastTime : frameDt; lastTime = time;
+  const ev = events; events = [];
+  const s = run.settings;
+
+  if(run.phase==='cal_home'){
+    if(!run.placed && head.ok){ showBoard([{t:'準備 1/2',bold:true},'楽な姿勢で立ち、','両手を胸の前に構えて','トリガーを引いてください。',{t:'ここが毎回の「ホーム位置」になります。',size:34,color:'#9fb0bf'}]); run.placed=true; }
+    if(ev.some(e=>e.type==='trigger')){
+      if(!handOk(0)||!handOk(1)){ showBoard([{t:'両方のコントローラーが',bold:true},'見えていません。','両手を視界に入れて','もう一度トリガーを。']); return; }
+      homes[0].position.copy(hands[0].grip.position); homes[1].position.copy(hands[1].grip.position);
+      cal.headPos.copy(head.pos); cal.f.set(head.fwd.x,0,head.fwd.z).normalize();
+      cal.r.crossVectors(cal.f, cal.u).normalize();
+      run.phase='cal_reach';
+      showBoard([{t:'準備 2/2',bold:true},'片腕をまっすぐ前に','伸ばしきって','トリガーを引いてください。',{t:'届く範囲に玉を置くための計測です。',size:34,color:'#9fb0bf'}]);
+    }
+  }
+  else if(run.phase==='cal_reach'){
+    const t = ev.find(e=>e.type==='trigger');
+    if(t){
+      const reach = hands[t.hand].grip.position.distanceTo(head.pos);
+      cal.R = clamp(reach*0.8, 0.35, 0.7);
+      cal.fix.copy(cal.headPos).addScaledVector(cal.f, cal.R);
+      fixGroup.position.copy(cal.fix); fixGroup.lookAt(cal.headPos);
+      cal.done = true; prepWait();
+    }
+  }
+  else if(run.phase==='wait'){
+    const dev = headDevTo(cal.fix);
+    const inHome = [0,1].map(i=>handOk(i) && hands[i].grip.position.distanceTo(homes[i].position) < HOME_R);
+    inHome.forEach((ok,i)=>{ homeMats[i].color.setHex(ok?0x4fae7a:0x8fa3b5); homeMats[i].opacity = ok?.28:.2; });
+    const posOk = head.pos.distanceTo(cal.headPos) < POS_TOL;
+    if(dev<HEAD_TOL && inHome[0] && inHome[1] && posOk){
+      setHint(null);
+      if(run.holdStart==null) run.holdStart=time;
+      if(time-run.holdStart >= run.fore) startStim(time);
+    } else {
+      if(run.holdStart!=null && !(inHome[0]&&inHome[1])) run.aborted++;
+      run.holdStart=null;
+      setHint(!posOk ? '立ち位置を戻してください' : dev>=HEAD_TOL ? '中央の点に顔を向けてください' : '両手をホームに戻してください');
+    }
+  }
+  else if(run.phase==='stim'){
+    const tr = run.cur, el = time - run.onset;
+    const due = el + frameDt/2 >= s.flashMs;
+    if(due && (symO.visible || symX.visible)){ symO.visible=symX.visible=false; }
+    if(due && tr.mode==='flash' && target.visible){ target.visible=false; run.shown=el; }
+    if(el<=300) run.devMax = Math.max(run.devMax, headDevTo(cal.fix));
+    let hit=null;
+    hands.forEach((h,i)=>{
+      if(!handOk(i)) return;
+      const p = h.grip.position;
+      run.samples[i].push({t:el, p:p.clone()});
+      if(hit==null && segDist(h.prev, p, run.tpos) < TARGET_R+HAND_R) hit=i;
+      h.prev.copy(p);
+    });
+    if(hit!=null || el > s.timeoutMs){
+      target.visible=false; symO.visible=symX.visible=false;
+      let rt=null, mt=null;
+      if(hit!=null){
+        buzz(hit);
+        const smp = run.samples[hit], p0 = smp[0]?.p;
+        const mv = p0 ? smp.find(q=>q.p.distanceTo(p0) > MOVE_THRESH) : null;
+        rt = mv ? mv.t : el; mt = el - rt;
+      }
+      run.rec = { mode:tr.mode, flash_ms: tr.mode==='flash'? s.flashMs : '', ecc_deg:tr.ecc, dir_deg:tr.dir,
+        hit: hit!=null ? 1:0, hand: hit==null ? '' : (hands[hit].source?.handedness || hit),
+        rt_ms: rt==null?null:Math.round(rt), mt_ms: mt==null?null:Math.round(mt), total_ms: hit!=null?Math.round(el):null,
+        shown_ms: tr.mode==='flash' ? Math.round(run.shown ?? el) : Math.round(el),
+        head_dev_max_deg: +run.devMax.toFixed(1), central_shown: s.central ? run.sym : '', central_answer:'', central_correct:'',
+        aborted_holds: run.aborted };
+      if(s.central){ run.phase='answer'; showBoard([{t:'中央の記号は？',bold:true},'下ボタン（A / X）＝ ○','上ボタン（B / Y）＝ ×',{t:'わからなければトリガー',size:34,color:'#9fb0bf'}]); }
+      else finishTrial(time);
+    }
+  }
+  else if(run.phase==='answer'){
+    const e = ev.find(e=>['lower','upper','trigger'].includes(e.type));
+    if(e){
+      const ans = e.type==='lower' ? 'o' : e.type==='upper' ? 'x' : '?';
+      run.rec.central_answer = ans; run.rec.central_correct = ans===run.sym ? 1 : 0;
+      board.mesh.visible=false; finishTrial(time);
+    }
+  }
+  else if(run.phase==='feedback'){
+    if(time >= run.until){
+      setHint(null);
+      run.idx++;
+      if(run.idx >= run.trials.length) finishRun();
+      else prepWait();
+    }
+  }
+  else if(run.phase==='done'){
+    if(ev.some(e=>e.type==='trigger')){ newRun(run.settings); }
+    else if(ev.some(e=>e.type==='upper')){ renderer.xr.getSession()?.end(); }
+  }
+}
+function startStim(time){
+  const tr = run.cur = run.trials[run.idx];
+  run.tpos = targetPos(tr.ecc, tr.dir);
+  target.position.copy(run.tpos); target.visible = true;
+  homes.forEach(h=>h.visible=false); setHint(null);
+  if(run.settings.central){ run.sym = Math.random()<.5 ? 'o':'x'; (run.sym==='o'?symO:symX).visible = true; }
+  run.onset = time; run.shown=null; run.devMax=0; run.samples=[[],[]];
+  hands.forEach(h=>h.prev.copy(h.grip.position));
+  run.phase='stim';
+}
+function finishTrial(time){
+  run.results.push(run.rec);
+  const r = run.rec;
+  setHint(r.hit ? `${r.total_ms} ms` : '時間切れ');
+  run.phase='feedback'; run.until = time + 700;
+}
+function saveRun(complete){
+  if(run.saved || !run.results.length) return;
+  const h = loadHistory();
+  const sess = {id:run.id, date:run.date, settings:run.settings, radius:+cal.R.toFixed(3), complete, trials:run.results};
+  h.push(sess); saveHistory(h); run.saved=true; lastShownSession = sess;
+  renderHistory(); renderChart(sess);
+}
+function finishRun(){
+  saveRun(true);
+  fixGroup.visible=false; homes.forEach(h=>h.visible=false);
+  const res = run.results, lines = [];
+  const m = summarize(res);
+  lines.push({t:`完了  ${m.n}試行 / 命中 ${m.hits}`, bold:true});
+  lines.push({cols:['離心角','反応','運動','合計'], size:34, color:'#9fb0bf'});
+  for(const e of run.settings.eccs){
+    const s = summarize(res.filter(t=>t.ecc_deg===e));
+    lines.push({cols:[`${e}°`, r0(s.rt), r0(s.mt), r0(s.total)], size:38});
+  }
+  if(m.cenN) lines.push({t:`中央記号 正答 ${m.cenOk}/${m.cenN}`, size:36});
+  const moved = res.filter(t=>t.head_dev_max_deg>3).length;
+  lines.push({t:`顔が3°以上ずれた試行 ${moved}`, size:36});
+  lines.push({t:'トリガー：もう一度　B / Y：終了', size:32, color:'#9fb0bf'});
+  run.phase='done'; showBoard(lines);
+}
+
+/* ---------- ループと開始 ---------- */
+renderer.setAnimationLoop((time, frame)=>{
+  if(frame && run && renderer.xr.isPresenting){
+    const pose = frame.getViewerPose(renderer.xr.getReferenceSpace());
+    if(pose){ const p=pose.transform.position, o=pose.transform.orientation;
+      head.pos.set(p.x,p.y,p.z); head.fwd.set(0,0,-1).applyQuaternion(new THREE.Quaternion(o.x,o.y,o.z,o.w)); head.ok=true; }
+    pollButtons(); step(time);
+  }
+  renderer.render(scene, camera);
+});
+
+async function enterVR(){
+  const st = $('xrstatus');
+  if(!navigator.xr){ st.textContent='このブラウザはWebXRに対応していません。Questのブラウザで、HTTPSで配信したこのページを開いてください。'; return; }
+  try{
+    if(!await navigator.xr.isSessionSupported('immersive-vr')){ st.textContent='この端末ではVRモードを開始できません。Questのブラウザで開いてください。'; return; }
+    const session = await navigator.xr.requestSession('immersive-vr', {optionalFeatures:['local-floor']});
+    await renderer.xr.setSession(session);
+    try{ if(session.supportedFrameRates?.includes(90)) await session.updateTargetFrameRate(90); }catch{}
+    session.addEventListener('end', ()=>{ if(run && run.phase!=='done') saveRun(false); run=null; cal.done=false; head.ok=false;
+      [fixGroup,target,board.mesh,hint.mesh,...homes].forEach(o=>o.visible=false); st.textContent='VRを終了しました。'; });
+    lastTime=0; events=[];
+    newRun(readSettings());
+    st.textContent='';
+  }catch(err){ st.textContent='VRを開始できませんでした：'+err.message; }
+}
+$('enter').onclick = enterVR;
+document.querySelectorAll('#setup input').forEach(i=>i.addEventListener('change', updateCount));
+updateCount(); renderHistory();
+{ const h=loadHistory(); if(h.length){ lastShownSession=h.at(-1); renderChart(lastShownSession); } }
+</script>
+</body>
+</html>
